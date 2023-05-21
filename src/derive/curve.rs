@@ -162,6 +162,17 @@ macro_rules! new_curve_impl {
                 #[derive(Copy, Clone)]
                 pub struct [<$name Compressed >]([u8; [< $name _COMPRESSED_SIZE >]]);
 
+                impl [< $name Compressed >] {
+                    pub fn from_slice(slice: &[u8]) -> Result<Self, &'static str> {
+                        if slice.len() != [< $name _COMPRESSED_SIZE >] {
+                            return Err("Slice length not match");
+                        }
+                        let mut c = [0u8; [< $name _COMPRESSED_SIZE >]];
+                        c.copy_from_slice(slice);
+                        Ok(Self(c))
+                    }
+                }
+
                 // Compressed
                 impl std::fmt::Debug for [< $name Compressed >] {
                     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -195,7 +206,7 @@ macro_rules! new_curve_impl {
                         let bytes = &bytes.0;
                         let mut tmp = *bytes;
                         let is_inf = Choice::from(tmp[[< $name _COMPRESSED_SIZE >] - 1] >> 7);
-                        let ysign = Choice::from(tmp[[< $name _COMPRESSED_SIZE >] - 1] >> 6);
+                        let ysign = Choice::from((tmp[[< $name _COMPRESSED_SIZE >] - 1] >> 6) & 1);
                         tmp[[< $name _COMPRESSED_SIZE >] - 1] &= 0b0011_1111;
                         let mut xbytes = [0u8; $base::size()];
                         xbytes.copy_from_slice(&tmp[ ..$base::size()]);
@@ -553,9 +564,17 @@ macro_rules! new_curve_impl {
                 (x, y, self.z)
             }
 
-
-            fn hash_to_curve<'a>(_: &'a str) -> Box<dyn Fn(&[u8]) -> Self + 'a> {
-                unimplemented!();
+            fn hash_to_curve<'a>(domain_prefix: &'a str) -> Box<dyn Fn(&[u8]) -> Self + 'a> {
+               use crate::derive::hashtocurve;
+               Box::new(move |message| {
+                  let mut us = [Field::ZERO; 2];
+                  hashtocurve::hash_to_field($name::CURVE_ID, domain_prefix, message, &mut us);
+                  let q0: Self = hashtocurve::try_and_increment(&us[0]);
+                  let q1: Self  = hashtocurve::try_and_increment(&us[1]);
+                  let r: Self = q0 + &q1;
+                  debug_assert!(bool::from(r.is_on_curve()));
+                  r
+              })
             }
 
             fn is_on_curve(&self) -> Choice {
